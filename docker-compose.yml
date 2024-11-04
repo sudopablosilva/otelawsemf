@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib
+    container_name: otel-collector
+    volumes:
+      - ./otel-config.yaml:/otel-config.yaml
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+      - AWS_REGION=${AWS_REGION}
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    command: ["--config", "/otel-config.yaml"]
+
+  java-app:
+    build:
+      context: java-app
+      target: final
+    container_name: java-app
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_JAVAAGENT_DEBUG=false
+      - JAVA_TOOL_OPTIONS=-javaagent:/app/opentelemetry-javaagent.jar -Dotel.traces.exporter=none -Dotel.metrics.exporter=otlp -Dotel.logs.exporter=none -Dotel.imr.export.interval=1000
+    ports:
+      - "8080:8080"
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/hello"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    entrypoint: ["java", "-jar", "/app/app.jar"]
+
+  request-sender:
+    image: curlimages/curl:7.85.0
+    container_name: request-sender
+    depends_on:
+      - java-app
+    command: ["/bin/sh", "-c", "while true; do echo 'Sending request to java-app...'; curl -s http://java-app:8080/api/hello; echo ''; sleep 5; done"]
+    # command: ["/bin/sh", "-c", "while true; do echo 'Sending request to java-app...'; curl -s http://java-app:8080/api/hello; echo ''; sleep 5; done"]
+
+  metric-sender:
+    image: python:3.12
+    container_name: metric-sender
+    working_dir: /app
+    volumes:
+      - ./send_metrics.py:/app/send_metrics.py
+      - ./requirements.txt:/app/requirements.txt
+    depends_on:
+      - otel-collector
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - PYTHONUNBUFFERED=1
+    command: ["/bin/sh", "-c", "pip install -r requirements.txt > /dev/null 2>&1 && python /app/send_metrics.py"]
