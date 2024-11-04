@@ -1,0 +1,43 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"  # Listen on all interfaces for gRPC
+      http:
+        endpoint: "0.0.0.0:4318"  # Listen on all interfaces for HTTP
+
+processors:
+  batch:
+    # timeout: 9s
+    send_batch_size: 5
+
+exporters:
+  awsemf:
+    log_group_name: "TestLogGroupAWSCollectorLGOfficial"
+    namespace: "TestLogGroupAWSCollectorNSOfficial"
+    region: "sa-east-1"
+    dimension_rollup_option: NoDimensionRollup
+    detailed_metrics: true
+    output_destination: cloudwatch #stdout
+    resource_to_telemetry_conversion:
+      enabled: true
+    metric_declarations:
+      - dimensions: [["service.name", "environment"]]
+        metric_name_selectors: ["test_requests_counter", "requestdurationms", "myhistogramms", "my.histogram.ms"]
+      - dimensions: [["service.name", "http.method", "http.route", "http.status_code"]]
+        metric_name_selectors: ["http.server.duration"]
+    metric_descriptors:
+      - metric_name: http.server.duration
+        unit: Milliseconds
+        # unit: Count
+        overwrite: true
+
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [awsemf]
